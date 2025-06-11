@@ -1,109 +1,198 @@
----
-id: javascript-environment
-title: JavaScript Environment
----
+import React, { useState, useEffect } from "react";
+import { db, collection, addDoc } from "../firebase";
+import { loadStripe } from "@stripe/stripe-js";
 
-import TableRow from '@site/core/TableRowWithCodeBlock';
+const stripePromise = loadStripe("YOUR_STRIPE_PUBLIC_KEY");
 
-## JavaScript Runtime
+export default function App() {
+  const [products, setProducts] = useState([]);
+  const [cart, setCart] = useState([]);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [selectedOptions, setSelectedOptions] = useState({});
 
-When using React Native, you're going to be running your JavaScript code in up to three environments:
+  useEffect(() => {
+    async function fetchProducts() {
+      try {
+        const res = await fetch("https://fakestoreapi.com/products");
+        const data = await res.json();
+        const formatted = data.map((item) => ({
+          id: item.id,
+          name: item.title,
+          price: item.price,
+          image: item.image,
+          category: item.category,
+          options: ["Default", "Premium"],
+        }));
+        setProducts(formatted);
+      } catch (err) {
+        console.error("Failed to fetch products", err);
+      }
+    }
+    fetchProducts();
+  }, []);
 
-- In most cases, React Native will use [Hermes](hermes), an open-source JavaScript engine optimized for React Native.
-- If Hermes is disabled, React Native will use [JavaScriptCore](https://trac.webkit.org/wiki/JavaScriptCore), the JavaScript engine that powers Safari. Note that on iOS, JavaScriptCore does not use JIT due to the absence of writable executable memory in iOS apps.
-- When using Chrome debugging, all JavaScript code runs within Chrome itself, communicating with native code via WebSockets. Chrome uses [V8](https://v8.dev/) as its JavaScript engine.
+  const addToCart = async (product) => {
+    const option = selectedOptions[product.id] || product.options[0];
+    const newItem = { ...product, selectedOption: option };
+    setCart((prev) => [...prev, newItem]);
 
-While these environments are very similar, you may end up hitting some inconsistencies. It is best to avoid relying on specifics of any runtime.
+    try {
+      await addDoc(collection(db, "cartItems"), newItem);
+      console.log("Cart item added to Firestore");
+    } catch (error) {
+      console.error("Firebase add failed", error);
+    }
+  };
 
-## JavaScript Syntax Transformers
+  const handleOptionChange = (productId, value) => {
+    setSelectedOptions((prev) => ({ ...prev, [productId]: value }));
+  };
 
-Syntax transformers make writing code more enjoyable by allowing you to use new JavaScript syntax without having to wait for support on all interpreters.
+  const filteredProducts = products.filter((product) => {
+    return (
+      product.name.toLowerCase().includes(search.toLowerCase()) &&
+      (categoryFilter ? product.category === categoryFilter : true)
+    );
+  });
 
-React Native ships with the [Babel JavaScript compiler](https://babeljs.io). Check [Babel documentation](https://babeljs.io/docs/plugins/#transform-plugins) on its supported transformations for more details.
+  const handleCheckout = async () => {
+    const stripe = await stripePromise;
+    const response = await fetch("/create-checkout-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: cart }),
+    });
+    const session = await response.json();
+    const result = await stripe.redirectToCheckout({ sessionId: session.id });
+    if (result.error) {
+      alert(result.error.message);
+    }
+  };
 
-A full list of React Native's enabled transformations can be found in [@react-native/babel-preset](https://github.com/facebook/react-native/tree/main/packages/react-native-babel-preset).
+  const fetchShopifyGraphQLProducts = async () => {
+    const query = `{
+      products(first: 5) {
+        edges {
+          node {
+            title
+            description
+            variants(first: 1) {
+              edges {
+                node {
+                  price
+                }
+              }
+            }
+          }
+        }
+      }
+    }`;
+    try {
+      const res = await fetch("https://your-shopify-store.myshopify.com/api/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Storefront-Access-Token": "your-access-token",
+        },
+        body: JSON.stringify({ query }),
+      });
+      const data = await res.json();
+      console.log("Shopify GraphQL Data:", data);
+    } catch (error) {
+      console.error("Failed to fetch from Shopify GraphQL", error);
+    }
+  };
 
-<table>
-<thead>
-  <tr><th>Transformation</th><th>Code</th></tr>
-</thead>
-<tbody>
-  <tr><td className="table-heading" colSpan="2">ECMAScript 5</td></tr>
-  <TableRow name="Reserved Words" code="promise.catch(function() {...});" />
-  <tr><td className="table-heading" colSpan="2">ECMAScript 2015 (ES6)</td></tr>
-  <TableRow name="Arrow functions" code="<C onPress={() => this.setState({pressed: true})} />" url="https://babeljs.io/docs/learn-es2015/#arrows" />
-  <TableRow name="Block scoping" code="let greeting = 'hi';" url="https://babeljs.io/docs/learn-es2015/#let-const" />
-  <TableRow name="Call spread" code="Math.max(...array);" url="https://babeljs.io/docs/learn-es2015/#default-rest-spread" />
-  <TableRow name="Classes" code="class C extends React.Component {render() { return <View />; }}" url="https://babeljs.io/docs/learn-es2015/#classes" />
-  <TableRow name="Computed Properties" code="const key = 'abc'; const obj = {[key]: 10};" url="https://babeljs.io/docs/learn-es2015/#enhanced-object-literals" />
-  <TableRow name="Constants" code="const answer = 42;" url="https://babeljs.io/docs/learn-es2015/#let-const" />
-  <TableRow name="Destructuring" code="const {isActive, style} = this.props;" url="https://babeljs.io/docs/learn-es2015/#destructuring" />
-  <TableRow name="for…of" code="for (var num of [1, 2, 3]) {...};" url="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/for...of" />
-  <TableRow name="Function Name" code="let number = x => x;" url="https://babeljs.io/docs/en/babel-plugin-transform-function-name" />
-  <TableRow name="Literals" code="const b = 0b11; const o = 0o7; const u = 'Hello\u{000A}\u{0009}!';" url="https://babeljs.io/docs/en/babel-plugin-transform-literals" />
-  <TableRow name="Modules" code="import React, {Component} from 'react';" url="https://babeljs.io/docs/learn-es2015/#modules" />
-  <TableRow name="Object Concise Method" code="const obj = {method() { return 10; }};" url="https://babeljs.io/docs/learn-es2015/#enhanced-object-literals" />
-  <TableRow name="Object Short Notation" code="const name = 'vjeux'; const obj = {name};" url="https://babeljs.io/docs/learn-es2015/#enhanced-object-literals" />
-  <TableRow name="Parameters" code="function test(x = 'hello', {a, b}, ...args) {}" url="https://babeljs.io/docs/en/babel-plugin-transform-parameters" />
-  <TableRow name="Rest Params" code="function(type, ...args) {};" url="https://github.com/sebmarkbage/ecmascript-rest-spread" />
-  <TableRow name="Shorthand Properties" code="const o = {a, b, c};" url="https://babeljs.io/docs/en/babel-plugin-transform-shorthand-properties" />
-  <TableRow name="Sticky Regex" code="const a = /o+/y;" url="https://babeljs.io/docs/en/babel-plugin-transform-sticky-regex" />
-  <TableRow name="Template Literals" code="const who = 'world'; const str = `Hello ${who}`;" url="https://babeljs.io/docs/learn-es2015/#template-strings" />
-  <TableRow name="Unicode Regex" code="const string = 'foo💩bar'; const match = string.match(/foo(.)bar/u);" url="https://babeljs.io/docs/en/babel-plugin-transform-unicode-regex" />
-  <tr><td className="table-heading" colSpan="2">ECMAScript 2016 (ES7)</td></tr>
-  <TableRow name="Exponentiation Operator" code="let x = 10 ** 2;" url="https://babeljs.io/docs/en/babel-plugin-transform-exponentiation-operator" />
-  <tr><td className="table-heading" colSpan="2">ECMAScript 2017 (ES8)</td></tr>
-  <TableRow name="Async Functions" code="async function doStuffAsync() {const foo = await doOtherStuffAsync();};" url="https://github.com/tc39/ecmascript-asyncawait" />
-  <TableRow name="Function Trailing Comma" code="function f(a, b, c,) {};" url="https://github.com/jeffmo/es-trailing-function-commas" />
-  <tr><td className="table-heading" colSpan="2">ECMAScript 2018 (ES9)</td></tr>
-  <TableRow name="Object Spread" code="const extended = {...obj, a: 10};" url="https://github.com/tc39/proposal-object-rest-spread" />
-  <tr><td className="table-heading" colSpan="2">ECMAScript 2019 (ES10)</td></tr>
-  <TableRow name="Optional Catch Binding" code="try {throw 0; } catch { doSomethingWhichDoesNotCareAboutTheValueThrown();}" url="https://babeljs.io/docs/en/babel-plugin-proposal-optional-catch-binding" />
-  <tr><td className="table-heading" colSpan="2">ECMAScript 2020 (ES11)</td></tr>
-  <TableRow name="Dynamic Imports" code="const package = await import('package'); package.function()" url="https://babeljs.io/docs/en/babel-plugin-syntax-dynamic-import" />
-  <TableRow name="Nullish Coalescing Operator" code="const foo = object.foo ?? 'default';" url="https://babeljs.io/docs/en/babel-plugin-proposal-nullish-coalescing-operator" />
-  <TableRow name="Optional Chaining" code="const name = obj.user?.name;" url="https://github.com/tc39/proposal-optional-chaining" />
-  <tr><td className="table-heading" colSpan="2">ECMAScript 2022 (ES13)</td></tr>
-  <TableRow name="Class Fields" code="class Bork {static a = 'foo'; static b; x = 'bar'; y;}" url="https://babeljs.io/docs/en/babel-plugin-proposal-class-properties" />
-  <tr><td className="table-heading" colSpan="2">Stage 1 Proposal</td></tr>
-  <TableRow name="Export Default From" code="export v from 'mod';" url="https://babeljs.io/docs/en/babel-plugin-proposal-export-default-from" />
-  <tr><td className="table-heading" colSpan="2">Miscellaneous</td></tr>
-  <TableRow name="Babel Template" code="template(`const %%importName%% = require(%%source%%);`);" url="https://babeljs.io/docs/en/babel-template" />
-  <TableRow name="Flow" code="function foo(x: ?number): string {};" url="https://flowtype.org/" />
-  <TableRow name="ESM to CJS" code="export default 42;" url="https://babeljs.io/docs/en/babel-plugin-transform-modules-commonjs" />
-  <TableRow name="JSX" code="<View style={{color: 'red'}} />" url="https://reactjs.org/docs/jsx-in-depth" />
-  <TableRow name="Object Assign" code="Object.assign(a, b);" url="https://babeljs.io/docs/en/babel-plugin-transform-object-assign" />
-  <TableRow name="React Display Name" code="const bar = createReactClass({});" url="https://babeljs.io/docs/en/babel-plugin-transform-react-display-name" />
-  <TableRow name="TypeScript" code="function foo(x: {hello: true, target: 'react native!'}): string {};" url="https://www.typescriptlang.org/" />
-</tbody>
-</table>
+  return (
+    <div className="p-6 bg-gray-100 min-h-screen">
+      <h1 className="text-4xl font-bold mb-6">🛍️ Shopify Furniture Store Clone</h1>
 
-## Polyfills
+      <div className="mb-6 flex gap-4 flex-wrap">
+        <input
+          type="text"
+          placeholder="Search furniture..."
+          className="p-2 border border-gray-300 rounded-xl"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
 
-Many standard functions are also available on all the supported JavaScript runtimes.
+        <select
+          className="p-2 border border-gray-300 rounded-xl"
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+        >
+          <option value="">All Categories</option>
+          {[...new Set(products.map((p) => p.category))].map((cat) => (
+            <option key={cat} value={cat}>{cat}</option>
+          ))}
+        </select>
 
-#### Browser
+        <button
+          className="px-4 py-2 bg-green-500 text-white rounded-xl"
+          onClick={fetchShopifyGraphQLProducts}
+        >
+          📦 Load Shopify Products
+        </button>
+      </div>
 
-- [CommonJS `require`](https://nodejs.org/docs/latest/api/modules.html)
-- `md [console.{log, warn, error, info, debug, trace, table, group, groupCollapsed, groupEnd}](https://developer.chrome.com/devtools/docs/console-api)`
-- [`XMLHttpRequest`, `fetch`](network.md#content)
-- [`{set, clear}{Timeout, Interval, Immediate}, {request, cancel}AnimationFrame`](timers.md#content)
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {filteredProducts.map((product) => (
+          <div
+            key={product.id}
+            className="bg-white rounded-2xl shadow-md p-4 hover:shadow-xl transition"
+          >
+            <img
+              src={product.image}
+              alt={product.name}
+              className="w-full h-40 object-cover rounded-lg"
+            />
+            <h2 className="text-xl font-semibold mt-2">{product.name}</h2>
+            <p className="text-gray-600">${product.price}</p>
+            <select
+              className="mt-2 w-full border border-gray-300 rounded-xl p-1"
+              value={selectedOptions[product.id] || product.options[0]}
+              onChange={(e) => handleOptionChange(product.id, e.target.value)}
+            >
+              {product.options.map((opt, i) => (
+                <option key={i} value={opt}>{opt}</option>
+              ))}
+            </select>
+            <button
+              className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 w-full"
+              onClick={() => addToCart(product)}
+            >
+              Add to Cart
+            </button>
+          </div>
+        ))}
+      </div>
 
-#### ECMAScript 2015 (ES6)
-
-- [`Array.from`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/from)
-- `md Array.prototype.{[find](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/find), [findIndex](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/findIndex)}`
-- [`Object.assign`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/assign)
-- `md String.prototype.{[startsWith](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/startsWith), [endsWith](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/endsWith), [repeat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/repeat), [includes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/includes)}`
-
-#### ECMAScript 2016 (ES7)
-
-- `md Array.prototype.[includes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/includes)`
-
-#### ECMAScript 2017 (ES8)
-
-- `md Object.{[entries](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/entries), [values](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/values)}`
-
-#### Specific
-
-- `__DEV__`
+      <div className="mt-10 bg-white p-6 rounded-2xl shadow">
+        <h2 className="text-2xl font-bold mb-2">🛒 Cart ({cart.length})</h2>
+        {cart.length === 0 ? (
+          <p className="text-gray-500">Cart is empty</p>
+        ) : (
+          <ul className="space-y-1">
+            {cart.map((item, i) => (
+              <li key={i} className="text-gray-700">
+                • {item.name} ({item.selectedOption}) — ${item.price}
+              </li>
+            ))}
+          </ul>
+        )}
+        {cart.length > 0 && (
+          <div className="mt-4 text-right font-semibold space-y-2">
+            <div>Total: ${cart.reduce((total, item) => total + item.price, 0).toFixed(2)}</div>
+            <button
+              onClick={handleCheckout}
+              className="mt-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700"
+            >
+              💳 Proceed to Checkout
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
